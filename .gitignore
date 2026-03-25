@@ -1,0 +1,32 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars
+
+# Environment files
+.env
+config.env
+*.env.local
+
+# Node
+node_modules/
+npm-debug.log*
+
+# React build
+mern-project/client/build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

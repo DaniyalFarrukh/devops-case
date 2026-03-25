@@ -1,0 +1,72 @@
+# monitoring/alert-rules.yaml
+# Apply with: kubectl apply -f monitoring/alert-rules.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: mern-app
+data:
+  alert-rules.yaml: |
+    groups:
+      - name: mern-app-alerts
+        rules:
+
+          # Alert if backend pod is down
+          - alert: BackendDown
+            expr: kube_deployment_status_replicas_available{deployment="backend", namespace="mern-app"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backend deployment has 0 available replicas"
+              description: "The backend service is completely down in namespace mern-app."
+
+          # Alert if frontend pod is down
+          - alert: FrontendDown
+            expr: kube_deployment_status_replicas_available{deployment="frontend", namespace="mern-app"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Frontend deployment has 0 available replicas"
+              description: "The frontend service is completely down."
+
+          # Alert if MongoDB pod is not running
+          - alert: MongoDBDown
+            expr: kube_pod_status_ready{pod=~"mongodb-.*", namespace="mern-app"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "MongoDB pod is not ready"
+              description: "MongoDB has been unavailable for more than 2 minutes."
+
+          # Alert if ETL CronJob fails
+          - alert: ETLJobFailed
+            expr: kube_job_failed{namespace="mern-app"} > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "ETL CronJob failed"
+              description: "A Python ETL job has failed in namespace mern-app."
+
+          # Alert on high CPU
+          - alert: HighCPUUsage
+            expr: rate(container_cpu_usage_seconds_total{namespace="mern-app"}[5m]) > 0.8
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage detected"
+              description: "A container in mern-app is using more than 80% CPU."
+
+          # Alert on high memory
+          - alert: HighMemoryUsage
+            expr: container_memory_usage_bytes{namespace="mern-app"} / container_spec_memory_limit_bytes > 0.85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage"
+              description: "A container is using more than 85% of its memory limit."

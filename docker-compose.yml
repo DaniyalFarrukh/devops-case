@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: sample_training
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - mern_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build:
+      context: ./mern-project/server
+      dockerfile: Dockerfile
+    container_name: backend
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - ATLAS_URI=mongodb://mongodb:27017/sample_training
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mern_network
+
+  frontend:
+    build:
+      context: ./mern-project/client
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:5050
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - mern_network
+
+  etl:
+    build:
+      context: ./python-project
+      dockerfile: Dockerfile
+    container_name: etl
+    networks:
+      - mern_network
+
+volumes:
+  mongo_data:
+
+networks:
+  mern_network:
+    driver: bridge
