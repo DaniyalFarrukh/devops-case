@@ -21,7 +21,8 @@ Developer Laptop
         └── Deploy to EC2 via SSH
                     │
                     ▼
-        AWS EC2 t2.micro (3.223.246.202)
+        AWS EC2 t3
+.micro (3.223.246.202)
             └── K3s Kubernetes Cluster
                 ├── React Frontend      → port 80   (2 replicas)
                 ├── Express Backend     → port 5050  (2 replicas)
@@ -80,7 +81,7 @@ devops-case/
 
 The following AWS resources are provisioned via Terraform:
 
-- **EC2 Instance** — `t2.micro` (free tier), Ubuntu 24.04
+- **EC2 Instance** — `t3.micro` (free tier), Ubuntu 24.04
 - **Security Group** — Allows inbound traffic on ports 22 (SSH), 80 (HTTP), 443 (HTTPS), 5050 (Backend API)
 - **Elastic IP** — Static public IP `3.223.246.202` so the address persists across reboots
 - **Bootstrap Script** — Automatically installs Docker and K3s on first boot
@@ -216,8 +217,8 @@ sudo journalctl -u k3s -f
 
 ## Challenges & Solutions
 
-### 1. t2.micro Memory Constraints
-**Problem:** K3s requires ~600MB RAM at minimum. The t2.micro instance only has 1GB total, leaving very little headroom for application pods. K3s would frequently crash due to OOM (Out of Memory) errors.
+### 1. t3.micro Memory Constraints
+**Problem:** K3s requires ~600MB RAM at minimum. The t3.micro instance only has 1GB total, leaving very little headroom for application pods. K3s would frequently crash due to OOM (Out of Memory) errors.
 
 **Solution:** Added 2GB of swap space to the EC2 instance, giving the OS virtual memory to fall back on:
 ```bash
