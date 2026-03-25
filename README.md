@@ -1,417 +1,264 @@
-# DevOps Case Study — MERN Stack + Python ETL Deployment
+# DevOps Case Study — MERN Stack Deployment on AWS
 
-**Author:** Daniyal Farrukh  
-**Stack:** Docker · Kubernetes (K3s) · Terraform · GitHub Actions · AWS EC2  
-**Docker Hub:** [daniyalf42003](https://hub.docker.com/u/daniyalf42003)
+## Overview
 
----
-
-## Table of Contents
-
-1. [Architecture Overview](#architecture-overview)
-2. [Repository Structure](#repository-structure)
-3. [Prerequisites](#prerequisites)
-4. [Local Development (Docker Compose)](#local-development-docker-compose)
-5. [Cloud Deployment (AWS EC2 + K3s)](#cloud-deployment-aws-ec2--k3s)
-   - [Step 1 — Provision Infrastructure (Terraform)](#step-1--provision-infrastructure-terraform)
-   - [Step 2 — Configure GitHub Secrets](#step-2--configure-github-secrets)
-   - [Step 3 — Push to Main (Triggers CI/CD)](#step-3--push-to-main-triggers-cicd)
-   - [Step 4 — Verify Deployment](#step-4--verify-deployment)
-6. [CI/CD Pipeline](#cicd-pipeline)
-7. [Kubernetes Manifests](#kubernetes-manifests)
-8. [Logging & Alerts](#logging--alerts)
-9. [Python ETL Project](#python-etl-project)
-10. [Acceptance Criteria Checklist](#acceptance-criteria-checklist)
-11. [Challenges & Solutions](#challenges--solutions)
-12. [Security Considerations](#security-considerations)
+This project demonstrates a production-grade deployment of a MERN (MongoDB, Express.js, React, Node.js) stack application along with a Python ETL service on AWS, using Docker, Kubernetes (K3s), GitHub Actions CI/CD, and Terraform for infrastructure as code.
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
-                         GitHub Push (main)
-                               │
-                    ┌──────────▼──────────┐
-                    │   GitHub Actions    │
-                    │  CI/CD Pipeline     │
-                    │  ① Test all code    │
-                    │  ② Build images     │
-                    │  ③ Push → DockerHub │
-                    │  ④ SSH → EC2 deploy │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   AWS EC2 t2.micro  │  ← Provisioned by Terraform
-                    │   (Free Tier)       │
-                    │                     │
-                    │  ┌───────────────┐  │
-                    │  │  K3s Cluster  │  │  ← Lightweight Kubernetes
-                    │  │               │  │
-                    │  │  [Frontend]   │  │  React (nginx) — Port 80
-                    │  │  [Backend]    │  │  Express.js    — Port 5050
-                    │  │  [MongoDB]    │  │  Internal only — Port 27017
-                    │  │  [ETL Cron]   │  │  Runs every 1 hour
-                    │  └───────────────┘  │
-                    └─────────────────────┘
-                               │
-                    Public IP (Elastic IP)
-                    http://<EC2-IP>        → Frontend
-                    http://<EC2-IP>:5050   → Backend API
+Developer Laptop
+    └── git push to GitHub
+            │
+            ▼
+    GitHub Actions (CI/CD Pipeline)
+        ├── Test Backend (Node.js)
+        ├── Test Frontend (React)
+        ├── Test Python ETL
+        ├── Build & Push Docker Images → Docker Hub
+        └── Deploy to EC2 via SSH
+                    │
+                    ▼
+        AWS EC2 t2.micro (3.223.246.202)
+            └── K3s Kubernetes Cluster
+                ├── React Frontend      → port 80   (2 replicas)
+                ├── Express Backend     → port 5050  (2 replicas)
+                ├── MongoDB             → internal   (persistent volume)
+                └── Python ETL CronJob → runs hourly
 ```
 
 ---
 
-## Repository Structure
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Cloud Provider | AWS (EC2, Elastic IP, Security Groups) |
+| Infrastructure as Code | Terraform |
+| Containerization | Docker |
+| Container Orchestration | Kubernetes (K3s) |
+| CI/CD | GitHub Actions |
+| Frontend | React.js |
+| Backend | Express.js / Node.js |
+| Database | MongoDB |
+| ETL Service | Python |
+| Docker Registry | Docker Hub |
+
+---
+
+## Project Structure
 
 ```
 devops-case/
-├── mern-project/
-│   ├── client/                   # React frontend
-│   │   ├── Dockerfile            # Multi-stage: Node build → nginx serve
-│   │   ├── nginx.conf            # nginx config with API proxy
-│   │   └── src/
-│   └── server/                   # Express.js backend
-│       ├── Dockerfile            # Multi-stage Node.js build
-│       ├── server.mjs            # Entry point (port 5050)
-│       ├── db/conn.mjs           # MongoDB connection
-│       └── routes/               # /record and /healthcheck
-├── python-project/
-│   ├── ETL.py                    # Fetches GitHub API data
-│   ├── Dockerfile
-│   └── requirements.txt
-├── k8s/
-│   ├── mern/
-│   │   ├── namespace.yaml        # mern-app namespace
-│   │   ├── mongodb.yaml          # MongoDB + PVC + Service
-│   │   ├── backend.yaml          # Backend Deployment + Service
-│   │   └── frontend.yaml         # Frontend Deployment + Service + Ingress
-│   └── python/
-│       └── etl-cronjob.yaml      # CronJob — runs ETL every hour
-├── terraform/
-│   ├── main.tf                   # EC2 + Security Group + EIP
+├── frontend/               # React application
+│   └── Dockerfile
+├── backend/                # Express.js API
+│   └── Dockerfile
+├── etl/                    # Python ETL service
+│   └── Dockerfile
+├── k8s/                    # Kubernetes manifests
+│   ├── namespace.yaml
+│   ├── mongodb.yaml
+│   ├── backend.yaml
+│   ├── frontend.yaml
+│   └── etl-cronjob.yaml
+├── terraform/              # Infrastructure as Code
+│   ├── main.tf
 │   ├── variables.tf
-│   ├── outputs.tf
-│   └── scripts/
-│       └── bootstrap.sh          # Installs Docker + K3s on EC2
-├── monitoring/
-│   └── alert-rules.yaml          # Prometheus alert rules
-├── docker-compose.yml            # Local development
-└── .github/
-    └── workflows/
-        └── ci-cd.yml             # Full CI/CD pipeline
+│   └── outputs.tf
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml       # GitHub Actions pipeline
+└── README.md
 ```
 
 ---
 
-## Prerequisites
+## Infrastructure Setup (Terraform)
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Docker Desktop | Latest | https://docs.docker.com/get-docker/ |
-| Terraform | >= 1.5.0 | https://developer.hashicorp.com/terraform/install |
-| AWS CLI | >= 2.x | https://aws.amazon.com/cli/ |
-| kubectl | Latest | https://kubernetes.io/docs/tasks/tools/ |
-| Git | Any | https://git-scm.com/ |
+The following AWS resources are provisioned via Terraform:
 
-You also need:
-- An **AWS account** (free tier is sufficient)
-- A **Docker Hub account** (free)
-- A **GitHub account** with this repo forked/cloned
+- **EC2 Instance** — `t2.micro` (free tier), Ubuntu 24.04
+- **Security Group** — Allows inbound traffic on ports 22 (SSH), 80 (HTTP), 443 (HTTPS), 5050 (Backend API)
+- **Elastic IP** — Static public IP `3.223.246.202` so the address persists across reboots
+- **Bootstrap Script** — Automatically installs Docker and K3s on first boot
 
----
-
-## Local Development (Docker Compose)
-
-The fastest way to run the full stack locally:
+### Deploy Infrastructure
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/DaniyalFarrukh/devops-case.git
-cd devops-case
-
-# 2. Start all services
-docker compose up --build
-
-# 3. Access the app
-# Frontend:  http://localhost
-# Backend:   http://localhost:5050
-# Healthcheck: http://localhost:5050/healthcheck
-```
-
-To stop:
-```bash
-docker compose down -v
-```
-
----
-
-## Cloud Deployment (AWS EC2 + K3s)
-
-### Step 1 — Provision Infrastructure (Terraform)
-
-```bash
-# Configure AWS credentials
-aws configure
-# Enter: Access Key ID, Secret Access Key, Region (us-east-1), output (json)
-
-# Go to terraform directory
-cd terraform
-
-# Generate SSH key pair (if you don't have one)
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/mern-deployer -N ""
-
-# Initialize Terraform
+cd terraform/
 terraform init
-
-# Preview what will be created
-terraform plan -var="ssh_public_key=$(cat ~/.ssh/mern-deployer.pub)"
-
-# Apply — creates EC2, Security Group, Elastic IP
-terraform apply -var="ssh_public_key=$(cat ~/.ssh/mern-deployer.pub)"
-
-# Note the outputs — you'll need the public IP
-# Example output:
-#   server_public_ip = "54.123.45.67"
-#   ssh_command      = "ssh -i ~/.ssh/mern-deployer ubuntu@54.123.45.67"
-#   app_url          = "http://54.123.45.67"
-```
-
-Wait ~3 minutes for the EC2 bootstrap script to finish installing Docker and K3s.
-
-Verify K3s is running:
-```bash
-ssh -i ~/.ssh/mern-deployer ubuntu@<EC2-IP>
-kubectl get nodes
-# Should show: STATUS = Ready
+terraform plan
+terraform apply
 ```
 
 ---
 
-### Step 2 — Configure GitHub Secrets
+## Containerization
 
-In your GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
+Each application component has its own Dockerfile:
 
-| Secret Name | Value |
-|-------------|-------|
-| `DOCKER_PASSWORD` | Your Docker Hub password or access token |
-| `EC2_PUBLIC_IP` | The IP from `terraform output server_public_ip` |
-| `EC2_SSH_PRIVATE_KEY` | Contents of `~/.ssh/mern-deployer` (private key) |
+- **Frontend** — Multi-stage build: Node.js to build React app, Nginx to serve static files
+- **Backend** — Node.js Alpine image, exposes port 5050
+- **ETL** — Python 3 image, runs as a Kubernetes CronJob every hour
+- **MongoDB** — Official `mongo` image with persistent volume claim
 
-To get private key content:
-```bash
-cat ~/.ssh/mern-deployer
-# Copy everything including -----BEGIN RSA PRIVATE KEY----- lines
-```
+Docker images are pushed to Docker Hub under `daniyalf42003/`:
+- `daniyalf42003/frontend`
+- `daniyalf42003/backend`
+- `daniyalf42003/etl`
 
 ---
 
-### Step 3 — Push to Main (Triggers CI/CD)
+## Kubernetes Deployment
+
+The application runs in the `mern-app` namespace on a K3s cluster.
+
+### Apply all manifests
 
 ```bash
-git add .
-git commit -m "Initial deployment"
-git push origin main
+kubectl apply -f k8s/
 ```
 
-GitHub Actions will automatically:
-1. ✅ Run backend tests
-2. ✅ Run frontend tests
-3. ✅ Run Python ETL smoke test
-4. 🐳 Build and push all 3 Docker images to Docker Hub
-5. 🚀 SSH into EC2 and apply all Kubernetes manifests
-6. ⏳ Wait for rolling deployment to complete
+### Key resources
 
-Monitor the pipeline at: `https://github.com/DaniyalFarrukh/devops-case/actions`
+| Resource | Type | Details |
+|---|---|---|
+| `mongodb` | Deployment + PVC | Persistent storage via local-path provisioner |
+| `backend` | Deployment + Service | 2 replicas, ClusterIP service |
+| `frontend` | Deployment + Service | 2 replicas, NodePort on 80 |
+| `mern-ingress` | Ingress | Traefik routes traffic to frontend/backend |
+| `etl-cronjob` | CronJob | Runs Python ETL every hour |
 
----
-
-### Step 4 — Verify Deployment
+### Check pod status
 
 ```bash
-# SSH into EC2
-ssh -i ~/.ssh/mern-deployer ubuntu@<EC2-IP>
-
-# Check all pods are running
 kubectl get pods -n mern-app
-
-# Expected output:
-# NAME                        READY   STATUS    RESTARTS
-# mongodb-xxxx                1/1     Running   0
-# backend-xxxx                1/1     Running   0
-# backend-yyyy                1/1     Running   0
-# frontend-xxxx               1/1     Running   0
-# frontend-yyyy               1/1     Running   0
-
-# Check services
 kubectl get services -n mern-app
-
-# Check ingress
-kubectl get ingress -n mern-app
-
-# Test healthcheck endpoint
-curl http://localhost:5050/healthcheck
-# Expected: {"uptime":...,"message":"OK","timestamp":...}
 ```
-
-Access in browser:
-- **Frontend:** `http://<EC2-IP>`
-- **Backend API:** `http://<EC2-IP>:5050/healthcheck`
-- **Records API:** `http://<EC2-IP>:5050/record`
 
 ---
 
-## CI/CD Pipeline
+## CI/CD Pipeline (GitHub Actions)
 
-The pipeline defined in `.github/workflows/ci-cd.yml` has **5 jobs**:
+The pipeline is defined in `.github/workflows/ci-cd.yml` and runs on every push to `main`.
+
+### Pipeline Stages
 
 ```
-test-backend ──┐
-               ├──► build-and-push ──► deploy
-test-frontend ─┤
-               │
-test-python ───┘
+Push to main
+    │
+    ├── [Parallel] Test Backend     → npm test
+    ├── [Parallel] Test Frontend    → npm test
+    ├── [Parallel] Test Python ETL  → pytest
+    │
+    ├── Build & Push Docker Images  → pushes to Docker Hub
+    │
+    └── Deploy to EC2 (K3s)
+            ├── SSH into EC2
+            ├── kubectl apply -f k8s/
+            └── kubectl rollout restart deployments
 ```
 
-| Job | Trigger | What it does |
-|-----|---------|-------------|
-| `test-backend` | Every push/PR | `npm ci` + `npm test` |
-| `test-frontend` | Every push/PR | `npm ci` + React tests |
-| `test-python` | Every push/PR | Runs `ETL.py` as smoke test |
-| `build-and-push` | Push to main only | Builds 3 Docker images, pushes to Docker Hub with `latest` + commit SHA tags |
-| `deploy` | Push to main only | SSHs into EC2, applies K8s manifests, triggers rolling restart |
+### GitHub Secrets Required
+
+| Secret | Description |
+|---|---|
+| `EC2_PUBLIC_IP` | Public IP of the EC2 instance |
+| `DOCKER_PASSWORD` | Docker Hub access token |
+| `EC2_SSH_PRIVATE_KEY` | Full private key including BEGIN/END headers |
 
 ---
 
-## Kubernetes Manifests
+## Logging
 
-| File | Resources Created |
-|------|-----------------|
-| `namespace.yaml` | `mern-app` namespace |
-| `mongodb.yaml` | Deployment, PVC (5Gi), ClusterIP Service |
-| `backend.yaml` | Deployment (2 replicas), ClusterIP Service |
-| `frontend.yaml` | Deployment (2 replicas), NodePort Service, Ingress |
-| `etl-cronjob.yaml` | CronJob (schedule: `0 * * * *`) |
-
-Key design decisions:
-- **MongoDB** is `ClusterIP` only — never exposed to the internet
-- **Backend** has 2 replicas for high availability
-- **Frontend** is served by nginx with React Router support
-- **ETL** runs as a K8s CronJob every hour as required by the README
-
----
-
-## Logging & Alerts
-
-### Viewing Logs
+Application logs are accessible via `kubectl logs`:
 
 ```bash
-# Backend logs
-kubectl logs -l app=backend -n mern-app --tail=100 -f
+# View backend logs
+kubectl logs -l app=backend -n mern-app --tail=100
 
-# Frontend logs
-kubectl logs -l app=frontend -n mern-app --tail=50
+# View frontend logs
+kubectl logs -l app=frontend -n mern-app --tail=100
 
-# MongoDB logs
-kubectl logs -l app=mongodb -n mern-app
+# View MongoDB logs
+kubectl logs -l app=mongodb -n mern-app --tail=100
 
-# ETL job logs
-kubectl logs -l app=etl-job -n mern-app
+# View ETL job logs
+kubectl logs -l app=etl -n mern-app --tail=100
 ```
 
-### Alert Rules
-
-Defined in `monitoring/alert-rules.yaml`. Alerts fire for:
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| `BackendDown` | 0 backend replicas available | Critical |
-| `FrontendDown` | 0 frontend replicas available | Critical |
-| `MongoDBDown` | MongoDB pod not ready for 2m | Critical |
-| `ETLJobFailed` | Any CronJob failure | Warning |
-| `HighCPUUsage` | Container CPU > 80% for 5m | Warning |
-| `HighMemoryUsage` | Container memory > 85% limit | Warning |
-
-Apply monitoring rules:
+K3s also stores node-level logs accessible via:
 ```bash
-kubectl apply -f monitoring/alert-rules.yaml
+sudo journalctl -u k3s -f
 ```
 
 ---
 
-## Python ETL Project
+## Alerts & Monitoring
 
-The `ETL.py` script fetches data from the GitHub API and prints the response. It is containerized and runs as a **Kubernetes CronJob every hour**.
-
-```bash
-# Run manually to test
-cd python-project
-pip install -r requirements.txt
-python ETL.py
-
-# Or via Docker
-docker build -t python-etl .
-docker run python-etl
-
-# Check CronJob status on cluster
-kubectl get cronjobs -n mern-app
-kubectl get jobs -n mern-app
-```
+- **GitHub Actions** sends pipeline failure notifications via the built-in GitHub notification system on any job failure.
+- **UptimeRobot** is configured to monitor `http://3.223.246.202` and `http://3.223.246.202:5050/healthcheck` with email alerts if the endpoints go down.
+- **Kubernetes** restarts crashed containers automatically via the default restart policy (`Always`).
 
 ---
 
-## Acceptance Criteria Checklist
+## Accessing the Application
 
-### MERN Project
-- [x] MongoDB connected (via `mongodb-service:27017` in K8s)
-- [x] All endpoints working (`/record` GET, POST, PATCH, DELETE + `/healthcheck`)
-- [x] All pages working (React Router: `/`, `/records`, `/create`, `/edit/:id`)
-
-### Python Project
-- [x] `ETL.py` runs successfully
-- [x] Runs every 1 hour (K8s CronJob: `schedule: "0 * * * *"`)
-
-### DevOps Requirements
-- [x] Dockerfiles for all components
-- [x] Kubernetes manifests (K3s on EC2)
-- [x] CI/CD pipeline (GitHub Actions)
-- [x] Infrastructure as Code (Terraform)
-- [x] Logging & Alerts (kubectl logs + Prometheus rules)
-- [x] Documentation (this README)
+| Service | URL |
+|---|---|
+| Frontend | http://3.223.246.202 |
+| Backend Healthcheck | http://3.223.246.202:5050/healthcheck |
 
 ---
 
 ## Challenges & Solutions
 
-| Challenge | Solution |
-|-----------|----------|
-| EKS costs money on free tier | Used **K3s** on EC2 t2.micro — still real Kubernetes, zero cluster management fee |
-| MongoDB needs persistent storage in K8s | Used **PersistentVolumeClaim** so data survives pod restarts |
-| React app needs backend URL at build time | Passed `REACT_APP_API_URL` as Docker **build argument** in CI/CD |
-| nginx needs to support React Router | Configured `try_files $uri /index.html` to handle client-side routing |
-| EC2 needs Docker + K3s installed | **user_data bootstrap script** runs automatically on first boot |
-| Images need to update on deploy | `kubectl rollout restart` forces pods to pull `:latest` image |
+### 1. t2.micro Memory Constraints
+**Problem:** K3s requires ~600MB RAM at minimum. The t2.micro instance only has 1GB total, leaving very little headroom for application pods. K3s would frequently crash due to OOM (Out of Memory) errors.
+
+**Solution:** Added 2GB of swap space to the EC2 instance, giving the OS virtual memory to fall back on:
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### 2. SSH Private Key Format in GitHub Secrets
+**Problem:** The deploy job failed with `Permission denied (publickey)` because the SSH private key was pasted into GitHub Secrets without the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` header/footer lines.
+
+**Solution:** Re-added the secret with the complete key including all header and footer lines. The key must be copied exactly as output by `cat ~/.ssh/mern-deployer`.
+
+### 3. K3s API Server TLS Timeout
+**Problem:** After deploying pods, the K3s API server became unresponsive with TLS handshake timeouts due to memory pressure.
+
+**Solution:** Clearing the OS page cache and restarting K3s freed up enough memory:
+```bash
+sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+sudo systemctl restart k3s
+```
+
+### 4. Kubernetes Namespace Race Condition
+**Problem:** Running `kubectl apply -f k8s/` failed on first run because the namespace was being created in the same apply command that tried to use it.
+
+**Solution:** Running `kubectl apply -f k8s/` a second time resolved it — the namespace existed on the second run.
 
 ---
 
 ## Security Considerations
 
-- Backend and MongoDB communicate **inside the cluster only** (ClusterIP)
-- MongoDB is **never exposed** on a public port
-- Docker containers run as **non-root users**
-- SSH key authentication used (no passwords)
-- Sensitive values stored as **GitHub Secrets** — never hardcoded
-- Security group restricts inbound to only necessary ports (22, 80, 443, 5050)
+- SSH access is restricted to key-based authentication only (no password login)
+- MongoDB is not exposed outside the cluster (ClusterIP only)
+- Docker Hub credentials and SSH keys are stored as GitHub Secrets, never in code
+- Security Group restricts inbound ports to only what is necessary (22, 80, 443, 5050)
+- Terraform state should be stored in an S3 backend with encryption for production use
 
 ---
 
-## Teardown
+## Repository
 
-To avoid any AWS charges after submission:
-
-```bash
-cd terraform
-terraform destroy -var="ssh_public_key=$(cat ~/.ssh/mern-deployer.pub)"
-```
-
-This removes the EC2 instance, Security Group, and Elastic IP.
+GitHub: [https://github.com/DaniyalFarrukh/devops-case](https://github.com/DaniyalFarrukh/devops-case)
